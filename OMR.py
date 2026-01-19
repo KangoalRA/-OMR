@@ -1,8 +1,9 @@
 import streamlit as st
 import pandas as pd
+import time
 
 # ---------------------------------------------------------
-# 1. 정답 데이터베이스 (진도별 + 동형 완벽 반영)
+# 1. 정답 데이터베이스
 # ---------------------------------------------------------
 EXAM_DB = {
     "진도별 모의고사": {
@@ -36,120 +37,120 @@ EXAM_DB = {
 }
 
 # ---------------------------------------------------------
-# 2. UI 설정 및 사이드바
+# 2. 세션 상태 및 초기화 로직
 # ---------------------------------------------------------
-# 모바일 친화적으로 설정 (initial_sidebar_state="auto")
 st.set_page_config(page_title="사회 OMR 채점기", layout="centered", initial_sidebar_state="auto")
 
-# 모바일용 CSS 주입 (라디오 버튼 간격 넓히기 등)
+# CSS 설정
 st.markdown("""
 <style>
-    /* 모바일에서 터치하기 편하게 라디오 버튼 크기 조정 */
-    div[role="radiogroup"] > label {
-        margin-right: 15px !important;
-        font-size: 1.1rem !important;
-    }
-    /* 문제 번호 폰트 크기 키움 */
-    .question-text {
-        font-size: 1.2rem;
-        font-weight: bold;
-        padding-top: 5px;
-    }
+    div[role="radiogroup"] > label { margin-right: 15px !important; font-size: 1.1rem !important; }
+    .question-text { font-size: 1.2rem; font-weight: bold; padding-top: 5px; }
+    .timer-text { font-size: 1.5rem; font-weight: bold; color: #ff4b4b; text-align: center; border: 2px solid #ff4b4b; border-radius: 10px; padding: 10px; }
 </style>
 """, unsafe_allow_html=True)
 
-st.title("📝 사회 OMR 채점기")
+# 변수 초기화 함수
+def reset_exam_state():
+    st.session_state.started = False
+    st.session_state.start_time = None
+    st.session_state.current_score = None
+    # radio 버튼들을 초기화하기 위해 key를 변경함
+    st.session_state.form_key = time.time() 
 
+if 'started' not in st.session_state:
+    reset_exam_state()
+
+# ---------------------------------------------------------
+# 3. 사이드바 설정
+# ---------------------------------------------------------
 with st.sidebar:
     st.header("⚙️ 시험 설정")
     exam_type = st.radio("시험 종류", ["진도별 모의고사", "동형 모의고사"])
-    
     available_rounds = list(EXAM_DB[exam_type].keys())
     round_num = st.selectbox("회차 선택", available_rounds, format_func=lambda x: f"제 {x}회")
     
-    st.info(f"선택됨: **{exam_type} {round_num}회**")
-    st.markdown("---")
-    st.caption("👈 설정을 마치면 사이드바를 닫고\n넓은 화면에서 문제를 푸세요.")
-
-# ---------------------------------------------------------
-# 3. OMR 입력 폼 (모바일 최적화: 리스트 형태)
-# ---------------------------------------------------------
-st.subheader(f"✍️ {exam_type} 제 {round_num}회")
-st.caption("정답을 선택해주세요. 5문제마다 구분선이 있습니다.")
-
-with st.form("omr_form"):
-    user_answers = {}
-    
-    for i in range(1, 21):
-        # 1문제당 1개의 행(Row)을 사용
-        # col1: 문제 번호 (좁게), col2: 정답 선택 버튼 (넓게)
-        col1, col2 = st.columns([1.5, 5]) 
-        
-        with col1:
-            # 수직 정렬을 맞추기 위해 마진 조정
-            st.markdown(f'<div class="question-text">{i}번</div>', unsafe_allow_html=True)
-        
-        with col2:
-            # label_visibility="collapsed"로 "선택하세요" 같은 텍스트 숨김
-            user_answers[i] = st.radio(
-                f"{i}번 문제", 
-                options=[1, 2, 3, 4], 
-                horizontal=True, 
-                index=None, 
-                label_visibility="collapsed",
-                key=f"q_{i}"
-            )
-        
-        # 5문제마다 구분선 추가 (시각적 피로 감소)
-        if i % 5 == 0 and i != 20:
-            st.divider()
+    # 회차가 바뀌면 모든 데이터 리셋
+    current_round_id = f"{exam_type}_{round_num}"
+    if 'last_round_id' not in st.session_state or st.session_state.last_round_id != current_round_id:
+        st.session_state.last_round_id = current_round_id
+        reset_exam_state()
+        st.rerun()
 
     st.markdown("---")
-    # 버튼을 큼지막하게 만듦
-    submitted = st.form_submit_button("💯 채점하기", use_container_width=True)
+    if st.button("🔄 전체 초기화 (재시험)", use_container_width=True):
+        reset_exam_state()
+        st.rerun()
 
 # ---------------------------------------------------------
-# 4. 채점 로직 및 결과 표시
+# 4. 메인 화면 및 타이머 로직
 # ---------------------------------------------------------
-if submitted:
-    correct_answers = EXAM_DB[exam_type][round_num]
-    score = 0
-    wrong_list = []
-    
-    for i in range(1, 21):
-        user_ans = user_answers.get(i)
-        correct_ans = correct_answers[i-1]
+st.title(f"📝 {exam_type} 제 {round_num}회")
+
+if not st.session_state.started:
+    st.info("아래 버튼을 누르면 타이머가 작동하며 OMR 카드가 나타납니다.")
+    if st.button("🚀 풀이 시작", use_container_width=True, type="primary"):
+        st.session_state.started = True
+        st.session_state.start_time = time.time()
+        st.rerun()
+else:
+    # 타이머 표시 영역
+    timer_placeholder = st.empty()
+    elapsed = int(time.time() - st.session_state.start_time)
+    mins, secs = divmod(elapsed, 60)
+    timer_placeholder.markdown(f'<div class="timer-text">⏱️ 경과 시간: {mins:02d}:{secs:02d}</div>', unsafe_allow_html=True)
+
+    # OMR 폼 시작
+    with st.form(key=f"omr_form_{st.session_state.form_key}"):
+        user_answers = {}
+        for i in range(1, 21):
+            col1, col2 = st.columns([1, 4])
+            with col1:
+                st.markdown(f'<div class="question-text">{i}번</div>', unsafe_allow_html=True)
+            with col2:
+                user_answers[i] = st.radio(f"Q{i}", [1, 2, 3, 4], horizontal=True, index=None, label_visibility="collapsed", key=f"ans_{i}_{st.session_state.form_key}")
+            if i % 5 == 0 and i != 20:
+                st.divider()
+
+        st.markdown("---")
+        col_sub1, col_sub2 = st.columns(2)
+        with col_sub1:
+            submitted = st.form_submit_button("💯 채점하기", use_container_width=True, type="primary")
+        with col_sub2:
+            retest = st.form_submit_button("🔄 다시 풀기", use_container_width=True)
+
+    if retest:
+        reset_exam_state()
+        st.rerun()
+
+    # ---------------------------------------------------------
+    # 5. 채점 결과
+    # ---------------------------------------------------------
+    if submitted:
+        finish_time = int(time.time() - st.session_state.start_time)
+        f_mins, f_secs = divmod(finish_time, 60)
         
-        if user_ans == correct_ans:
-            score += 5
-        else:
-            wrong_list.append((i, user_ans, correct_ans))
-    
-    st.divider()
-    st.markdown(f"### 📊 당신의 점수는: **{score}점**")
-    
-    if score == 100:
+        correct_answers = EXAM_DB[exam_type][round_num]
+        score = 0
+        wrong_list = []
+        
+        for i in range(1, 21):
+            if user_answers.get(i) == correct_answers[i-1]:
+                score += 5
+            else:
+                wrong_list.append((i, user_answers.get(i), correct_answers[i-1]))
+        
+        st.divider()
         st.balloons()
-        st.success("완벽합니다! 만점입니다! 🎉")
-    elif score >= 80:
-        st.success("합격권입니다! 훌륭해요! 👍")
-    else:
-        st.warning("오답 정리를 통해 약점을 보완해봐요! 💪")
+        st.markdown(f"### 📊 결과: **{score}점**")
+        st.markdown(f"⏱️ **총 소요 시간:** {f_mins}분 {f_secs}초")
+        
+        if wrong_list:
+            st.markdown("#### ❌ 오답 확인")
+            res_df = pd.DataFrame([{"번호": f"{q}번", "내 답": u if u else "미입력", "정답": c} for q, u, c in wrong_list])
+            st.table(res_df)
+        else:
+            st.success("와우! 만점입니다! 대단해요! 🏆")
 
-    if wrong_list:
-        st.markdown("#### ❌ 오답 노트")
-        
-        # 오답 테이블 생성
-        result_df_data = []
-        for q_num, u_ans, c_ans in wrong_list:
-            u_ans_display = u_ans if u_ans is not None else "미입력"
-            result_df_data.append({
-                "번호": f"{q_num}번",
-                "내 답": u_ans_display,
-                "정답": c_ans,
-                "결과": "X"
-            })
-        
-        df = pd.DataFrame(result_df_data)
-        # 인덱스 숨기고 테이블 보여주기
-        st.table(df)
+# 타이머 실시간 업데이트를 위한 스크립트 (사용자가 아무것도 안 해도 1초마다 갱신되길 원할 경우)
+# 단, Streamlit의 특성상 입력 중 갱신되면 불편할 수 있어 자동 갱신은 빼고 입력 시마다 갱신되게 두었습니다.
