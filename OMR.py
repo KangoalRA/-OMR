@@ -3,7 +3,7 @@ import pandas as pd
 import time
 
 # ---------------------------------------------------------
-# 1. 정답 데이터베이스
+# 1. 정답 데이터베이스 (진도별 + 동형)
 # ---------------------------------------------------------
 EXAM_DB = {
     "진도별 모의고사": {
@@ -37,120 +37,117 @@ EXAM_DB = {
 }
 
 # ---------------------------------------------------------
-# 2. 세션 상태 및 초기화 로직
+# 2. UI 설정 및 CSS
 # ---------------------------------------------------------
-st.set_page_config(page_title="사회 OMR 채점기", layout="centered", initial_sidebar_state="auto")
+st.set_page_config(page_title="사회 OMR 채점기", layout="centered", initial_sidebar_state="collapsed")
 
-# CSS 설정
 st.markdown("""
 <style>
-    div[role="radiogroup"] > label { margin-right: 15px !important; font-size: 1.1rem !important; }
-    .question-text { font-size: 1.2rem; font-weight: bold; padding-top: 5px; }
-    .timer-text { font-size: 1.5rem; font-weight: bold; color: #ff4b4b; text-align: center; border: 2px solid #ff4b4b; border-radius: 10px; padding: 10px; }
+    div[role="radiogroup"] > label { margin-right: 20px !important; font-size: 1.2rem !important; }
+    .question-text { font-size: 1.3rem; font-weight: bold; padding-top: 5px; color: #333; }
+    .timer-container { 
+        position: sticky; top: 0; z-index: 1000; background-color: white; 
+        padding: 10px 0; border-bottom: 2px solid #eee; margin-bottom: 20px;
+    }
+    .timer-text { 
+        font-size: 1.8rem; font-weight: bold; color: #E74C3C; text-align: center; 
+        background: #FDEDEC; border: 2px solid #E74C3C; border-radius: 12px; padding: 10px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
-# 변수 초기화 함수
-def reset_exam_state():
+# ---------------------------------------------------------
+# 3. 세션 상태 관리
+# ---------------------------------------------------------
+if 'started' not in st.session_state: st.session_state.started = False
+if 'start_time' not in st.session_state: st.session_state.start_time = None
+if 'form_id' not in st.session_state: st.session_state.form_id = 0
+if 'submitted' not in st.session_state: st.session_state.submitted = False
+if 'final_time' not in st.session_state: st.session_state.final_time = 0
+
+def reset_exam():
     st.session_state.started = False
     st.session_state.start_time = None
-    st.session_state.current_score = None
-    # radio 버튼들을 초기화하기 위해 key를 변경함
-    st.session_state.form_key = time.time() 
-
-if 'started' not in st.session_state:
-    reset_exam_state()
+    st.session_state.submitted = False
+    st.session_state.form_id += 1 # 폼 ID 변경으로 라디오 버튼 초기화
 
 # ---------------------------------------------------------
-# 3. 사이드바 설정
+# 4. 사이드바 설정
 # ---------------------------------------------------------
 with st.sidebar:
     st.header("⚙️ 시험 설정")
     exam_type = st.radio("시험 종류", ["진도별 모의고사", "동형 모의고사"])
-    available_rounds = list(EXAM_DB[exam_type].keys())
-    round_num = st.selectbox("회차 선택", available_rounds, format_func=lambda x: f"제 {x}회")
+    round_num = st.selectbox("회차 선택", list(EXAM_DB[exam_type].keys()), format_func=lambda x: f"제 {x}회")
     
-    # 회차가 바뀌면 모든 데이터 리셋
-    current_round_id = f"{exam_type}_{round_num}"
-    if 'last_round_id' not in st.session_state or st.session_state.last_round_id != current_round_id:
-        st.session_state.last_round_id = current_round_id
-        reset_exam_state()
-        st.rerun()
+    # 회차 변경 감지
+    current_key = f"{exam_type}_{round_num}"
+    if 'last_key' not in st.session_state or st.session_state.last_key != current_key:
+        st.session_state.last_key = current_key
+        reset_exam()
 
-    st.markdown("---")
-    if st.button("🔄 전체 초기화 (재시험)", use_container_width=True):
-        reset_exam_state()
+    st.divider()
+    if st.button("🔄 재시험 (리셋)", use_container_width=True):
+        reset_exam()
         st.rerun()
 
 # ---------------------------------------------------------
-# 4. 메인 화면 및 타이머 로직
+# 5. 실시간 타이머 프래그먼트 (이 부분이 1초마다 실행됨)
 # ---------------------------------------------------------
-st.title(f"📝 {exam_type} 제 {round_num}회")
+@st.fragment(run_every="1s")
+def render_timer():
+    if st.session_state.started and not st.session_state.submitted:
+        elapsed = int(time.time() - st.session_state.start_time)
+        mins, secs = divmod(elapsed, 60)
+        st.markdown(f'<div class="timer-text">⏱️ {mins:02d}:{secs:02d}</div>', unsafe_allow_html=True)
+    elif st.session_state.submitted:
+        mins, secs = divmod(st.session_state.final_time, 60)
+        st.markdown(f'<div class="timer-text" style="color:#27AE60; border-color:#27AE60; background:#EAFAF1;">✅ 종료 {mins:02d}:{secs:02d}</div>', unsafe_allow_html=True)
+
+# ---------------------------------------------------------
+# 6. 메인 화면 로직
+# ---------------------------------------------------------
+st.title(f"✍️ {exam_type} {round_num}회")
 
 if not st.session_state.started:
-    st.info("아래 버튼을 누르면 타이머가 작동하며 OMR 카드가 나타납니다.")
+    st.info("준비가 되면 아래 버튼을 눌러주세요. 시계가 시작됩니다.")
     if st.button("🚀 풀이 시작", use_container_width=True, type="primary"):
         st.session_state.started = True
         st.session_state.start_time = time.time()
+        st.session_state.submitted = False
         st.rerun()
 else:
-    # 타이머 표시 영역
-    timer_placeholder = st.empty()
-    elapsed = int(time.time() - st.session_state.start_time)
-    mins, secs = divmod(elapsed, 60)
-    timer_placeholder.markdown(f'<div class="timer-text">⏱️ 경과 시간: {mins:02d}:{secs:02d}</div>', unsafe_allow_html=True)
+    # 1초마다 업데이트되는 타이머 노출
+    st.markdown('<div class="timer-container">', unsafe_allow_html=True)
+    render_timer()
+    st.markdown('</div>', unsafe_allow_html=True)
 
-    # OMR 폼 시작
-    with st.form(key=f"omr_form_{st.session_state.form_key}"):
-        user_answers = {}
+    # OMR 카드 폼
+    with st.form(key=f"omr_{st.session_state.form_id}"):
+        user_ans = {}
         for i in range(1, 21):
-            col1, col2 = st.columns([1, 4])
-            with col1:
-                st.markdown(f'<div class="question-text">{i}번</div>', unsafe_allow_html=True)
-            with col2:
-                user_answers[i] = st.radio(f"Q{i}", [1, 2, 3, 4], horizontal=True, index=None, label_visibility="collapsed", key=f"ans_{i}_{st.session_state.form_key}")
-            if i % 5 == 0 and i != 20:
-                st.divider()
+            c1, c2 = st.columns([1, 4])
+            with c1: st.markdown(f'<div class="question-text">{i}번</div>', unsafe_allow_html=True)
+            with c2: user_ans[i] = st.radio(f"Q{i}", [1, 2, 3, 4], horizontal=True, index=None, label_visibility="collapsed", key=f"q_{i}_{st.session_state.form_id}")
+            if i % 5 == 0 and i != 20: st.divider()
 
         st.markdown("---")
-        col_sub1, col_sub2 = st.columns(2)
-        with col_sub1:
-            submitted = st.form_submit_button("💯 채점하기", use_container_width=True, type="primary")
-        with col_sub2:
-            retest = st.form_submit_button("🔄 다시 풀기", use_container_width=True)
+        submit_btn = st.form_submit_button("💯 채점 및 제출", use_container_width=True, type="primary")
 
-    if retest:
-        reset_exam_state()
-        st.rerun()
+    if submit_btn:
+        st.session_state.submitted = True
+        st.session_state.final_time = int(time.time() - st.session_state.start_time)
+        
+        # 채점 계산
+        ans_list = EXAM_DB[exam_type][round_num]
+        score = sum(5 for i in range(1, 21) if user_ans.get(i) == ans_list[i-1])
+        wrongs = [{"번호": f"{i}번", "내 답": user_ans.get(i) if user_ans.get(i) else "미입력", "정답": ans_list[i-1]} 
+                  for i in range(1, 21) if user_ans.get(i) != ans_list[i-1]]
 
-    # ---------------------------------------------------------
-    # 5. 채점 결과
-    # ---------------------------------------------------------
-    if submitted:
-        finish_time = int(time.time() - st.session_state.start_time)
-        f_mins, f_secs = divmod(finish_time, 60)
-        
-        correct_answers = EXAM_DB[exam_type][round_num]
-        score = 0
-        wrong_list = []
-        
-        for i in range(1, 21):
-            if user_answers.get(i) == correct_answers[i-1]:
-                score += 5
-            else:
-                wrong_list.append((i, user_answers.get(i), correct_answers[i-1]))
-        
         st.divider()
-        st.balloons()
         st.markdown(f"### 📊 결과: **{score}점**")
-        st.markdown(f"⏱️ **총 소요 시간:** {f_mins}분 {f_secs}초")
-        
-        if wrong_list:
-            st.markdown("#### ❌ 오답 확인")
-            res_df = pd.DataFrame([{"번호": f"{q}번", "내 답": u if u else "미입력", "정답": c} for q, u, c in wrong_list])
-            st.table(res_df)
+        if wrongs:
+            st.markdown("#### ❌ 오답 노트")
+            st.table(pd.DataFrame(wrongs))
         else:
-            st.success("와우! 만점입니다! 대단해요! 🏆")
-
-# 타이머 실시간 업데이트를 위한 스크립트 (사용자가 아무것도 안 해도 1초마다 갱신되길 원할 경우)
-# 단, Streamlit의 특성상 입력 중 갱신되면 불편할 수 있어 자동 갱신은 빼고 입력 시마다 갱신되게 두었습니다.
+            st.balloons()
+            st.success("만점입니다! 축하드려요! 🏆")
